@@ -54,32 +54,37 @@ export const AERO = {
   source: EVIDENCE,
   coreCdA: 1.05,
   boosterCdA: 0.55,
-  chuteMid: 26,
-  chuteOpen: 125,
+  chuteMid: 48,
+  chuteOpen: 420,
 };
 
 export const CHUTE = {
   source: EVIDENCE,
-  maxAlt: 16000,
-  maxSpeed: 220,
+  /** 约 8 km、约 190 m/s 开伞不应直接算成功，所以门限收在这下面。 */
+  maxAlt: 4500,
+  maxSpeed: 80,
   deployTime: 1.2,
 };
 
 export const LANDING = {
   source: EVIDENCE,
-  /** 向下的径向速度上限，低于此值且姿态不倒才算落地。 */
-  maxSink: 20,
-  maxLateral: 16,
-  maxTilt: 1.05,
-  /** 参考点高于此高度之后，才开始判定落地或坠毁。 */
+  /** 约 15–20 m/s 的下沉不算轻落地。 */
+  maxSink: 11,
+  maxLateral: 8,
+  maxTilt: 0.6,
+  /** 底部高出这段之后，才按飞行中的落地规则，而不是发射台。 */
   leftPadAlt: 40,
+  /** 还在发射台附近时，超过这个地速或倾角就坠毁。估计。 */
+  padSlideSpeed: 22,
+  tipCrash: 0.85,
 };
 
 export const CONTROL = {
   source: EVIDENCE,
-  alpha: 1.8,
-  maxOmega: 1.0,
-  damp: 1.3,
+  /** 短按只是小幅倾斜，按住几秒才会接近水平。 */
+  alpha: 0.62,
+  maxOmega: 0.42,
+  damp: 2.4,
 };
 
 export const STAGE = {

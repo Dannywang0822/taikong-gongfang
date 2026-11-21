@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CHUTE, COPY, PICKER, PLANET } from "../js/data.js";
+import { readFileSync } from "node:fs";
+import { CHUTE, CONTROL, COPY, LANDING, PICKER, PLANET } from "../js/data.js";
 import {
   artRocket,
   bareRocket,
@@ -16,6 +17,7 @@ import {
   altitude,
   createFlight,
   fuelFrac,
+  shouldShowVelocityArrow,
   speedOf,
   step,
 } from "../js/sim.js";
@@ -166,6 +168,71 @@ test("hitting the ground without a chute fails the flight", () => {
   for (let i = 0; i < 100; i += 1) state = step(state, { ...idle, throttle: 1 }, 0.05).state;
   for (let i = 0; i < 4000 && !state.outcome; i += 1) state = step(state, idle, 0.05).state;
   assert.equal(state.outcome, "crash");
+});
+
+test("removing a placed part drops that part and what hangs on it", () => {
+  let parts = hopRocket();
+  const tank = parts.find((p) => p.defId === "tank-short");
+  const engine = parts.find((p) => p.defId === "engine-liquid");
+  assert.ok(tank && engine);
+  parts = removeSubtree(parts, tank.uid);
+  assert.equal(parts.some((p) => p.uid === tank.uid), false);
+  assert.equal(parts.some((p) => p.uid === engine.uid), false);
+  assert.equal(parts.some((p) => p.defId === "cmd-pod"), true);
+});
+
+test("part taps are not covered by the empty node layer", () => {
+  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8");
+  assert.match(css, /#nodes\s*\{[^}]*pointer-events:\s*none/);
+  assert.match(css, /\.node\s*\{[^}]*pointer-events:\s*auto/);
+  assert.match(css, /\.sprite\s*\{[^}]*pointer-events:\s*auto/);
+});
+
+test("tipping over on the pad crashes instead of sliding", () => {
+  let state = createFlight(compileVessel(hopRocket()));
+  for (let i = 0; i < 120 && !state.outcome; i += 1) {
+    state = step(state, { ...idle, right: true }, 0.05).state;
+  }
+  assert.equal(state.outcome, "crash");
+  assert.ok(Math.abs(state.vessels[0].att) > LANDING.tipCrash * 0.5);
+  assert.ok(state.maxAlt < LANDING.leftPadAlt);
+});
+
+test("a fast ground slide on the pad crashes", () => {
+  const state = createFlight(compileVessel(hopRocket()));
+  state.vessels[0].vx = 180;
+  const next = step(state, idle, 0.05);
+  assert.equal(next.state.outcome, "crash");
+  assert.ok(next.events.some((e) => e.type === "crash"));
+});
+
+test("a short steering hold is a tilt, not horizontal", () => {
+  let state = createFlight(compileVessel(hopRocket()));
+  for (let i = 0; i < 10; i += 1) state = step(state, { ...idle, right: true }, 0.05).state;
+  const att = Math.abs(state.vessels[0].att);
+  assert.equal(state.outcome, null);
+  assert.ok(att > 0.02, "moved " + att);
+  assert.ok(att < 0.22, "too far " + att);
+  assert.ok(CONTROL.maxOmega < 0.6);
+});
+
+test("a gentle tilt on the pad does not crash", () => {
+  let state = createFlight(compileVessel(hopRocket()));
+  state.vessels[0].att = 0.25;
+  for (let i = 0; i < 20; i += 1) state = step(state, { ...idle, throttle: 1 }, 0.05).state;
+  assert.equal(state.outcome, null);
+});
+
+test("retry at rest does not show the velocity arrow", () => {
+  let state = createFlight(compileVessel(hopRocket()));
+  for (let i = 0; i < 30; i += 1) state = step(state, idle, 0.05).state;
+  const speed = speedOf(state.vessels[0]);
+  assert.ok(speed < 12, "speed " + speed);
+  assert.equal(shouldShowVelocityArrow(speed), false);
+  assert.equal(shouldShowVelocityArrow(0), false);
+  assert.equal(LANDING.maxSink < 15, true);
+  assert.equal(CHUTE.maxAlt < 8000, true);
+  assert.equal(CHUTE.maxSpeed < 190, true);
 });
 
 test("worlds save in this project's own json", () => {

@@ -16,6 +16,7 @@ import {
   formatSpeed,
   fuelFrac,
   lowestAGL,
+  shouldShowVelocityArrow,
   speedOf,
   step,
 } from "./sim.js";
@@ -270,13 +271,15 @@ export function boot() {
     view.innerHTML = `
       <div class="screen" id="screen-home">
         <div class="sky"></div>
-        <div class="safe">
-          <div class="brand">
-            <div class="mark"><img src="assets/parts/cmd-pod.png" alt=""></div>
-            <h2>${COPY.meta.title}</h2>
-            <p>${COPY.meta.tagline}</p>
+        <div class="safe home-safe">
+          <div class="home-stage">
+            <div class="brand">
+              <div class="mark"><img src="assets/parts/cmd-pod.png" alt="" width="40" height="50"></div>
+              <h2>${COPY.meta.title}</h2>
+              <p>${COPY.meta.tagline}</p>
+            </div>
+            <div class="home-hero"><img src="assets/parts/rocket-home.png" alt=""></div>
           </div>
-          <div class="home-hero"><img src="assets/parts/rocket-home.png" alt=""></div>
           <div class="home-main">
             <button class="btn primary" type="button" data-go="worlds">${COPY.home.start}</button>
             <button class="btn" type="button" data-go="resume">${COPY.home.resume}</button>
@@ -329,13 +332,17 @@ export function boot() {
     view.innerHTML = `
       <div class="screen" id="screen-worlds">
         <div class="sky"></div>
-        <div class="safe">
+        <div class="safe world-safe">
           <div class="topbar"><button class="back" type="button" data-go="home">←</button><h3>${COPY.worlds.title}</h3></div>
-          <div class="world-list" id="world-list"></div>
-          <button class="btn primary" type="button" id="create-world">${COPY.worlds.create}</button>
-          <div class="field">
-            <label for="world-name">${COPY.worlds.name}</label>
-            <input id="world-name" maxlength="12" value="${COPY.worlds.placeholder}" autocomplete="off">
+          <div class="world-body">
+            <div class="world-list" id="world-list"></div>
+            <div class="world-side">
+              <button class="btn primary" type="button" id="create-world">${COPY.worlds.create}</button>
+              <div class="field">
+                <label for="world-name">${COPY.worlds.name}</label>
+                <input id="world-name" maxlength="12" value="${COPY.worlds.placeholder}" autocomplete="off">
+              </div>
+            </div>
           </div>
         </div>
         <div id="toast" class="toast home-toast" hidden></div>
@@ -396,7 +403,7 @@ export function boot() {
   function renderBuild() {
     const cells = PICKER.order.map((id) => {
       const part = getPart(id);
-      return `<button class="cell" type="button" data-part="${id}"><span class="thumb"><img src="${part.src}" alt=""></span><em>${part.name}</em></button>`;
+      return `<button class="cell" type="button" data-part="${id}"><span class="thumb"><img src="${part.src}" alt="" width="64" height="64"></span><em>${part.name}</em></button>`;
     }).join("");
     const states = CHUTE_STATES.map((s) => `<div class="state"><img src="${s.src}" alt="">${s.name}</div>`).join("");
     view.innerHTML = `
@@ -411,13 +418,17 @@ export function boot() {
               <button class="iconbtn" type="button" id="fly">${COPY.build.fly}</button>
             </div>
           </div>
-          <div class="bench" id="bench">
-            <div id="rocket-art"></div>
-            <div id="nodes"></div>
+          <div class="build-body">
+            <div class="bench" id="bench">
+              <div id="rocket-art"></div>
+              <div id="nodes"></div>
+            </div>
+            <div class="picker">
+              <div class="grid">${cells}</div>
+              <div class="states">${states}</div>
+              <div class="msg" id="build-msg"></div>
+            </div>
           </div>
-          <div class="grid" style="grid-template-columns: repeat(${PICKER.columns}, 1fr)">${cells}</div>
-          <div class="states">${states}</div>
-          <div class="msg" id="build-msg"></div>
         </div>
         <div id="toast" class="toast" hidden></div>
       </div>`;
@@ -434,7 +445,10 @@ export function boot() {
       app.pan = null;
     });
     bench.addEventListener("wheel", onWheel, { passive: false });
-    requestAnimationFrame(() => drawBuild());
+    drawBuild();
+    requestAnimationFrame(() => {
+      if (app.screen === "build") drawBuild();
+    });
   }
 
   function bindPalette(cell, defId) {
@@ -737,18 +751,20 @@ export function boot() {
         </svg>
         <div class="fuelchip"><b>${COPY.flight.fuel}</b><div class="fuelbar"><i id="fuel-fill"></i></div></div>
         <button class="menu" type="button" id="flight-menu">${COPY.flight.menu}</button>
-        <div class="hud-dock">
-          <div class="hud-read"><span>${COPY.flight.speed}</span><b id="read-speed">0 m/s</b></div>
-          <div class="thr-ring" id="thr" role="slider" aria-valuemin="0" aria-valuemax="100" aria-label="${COPY.flight.throttle}">
-            <div class="thr-core"><span>${COPY.flight.throttle}</span><b id="read-thr">0%</b></div>
+        <div class="flight-bar">
+          <div class="hud-dock">
+            <div class="hud-read"><span>${COPY.flight.speed}</span><b id="read-speed">0 m/s</b></div>
+            <div class="thr-ring" id="thr" role="slider" aria-valuemin="0" aria-valuemax="100" aria-label="${COPY.flight.throttle}">
+              <div class="thr-core"><span>${COPY.flight.throttle}</span><b id="read-thr">0%</b></div>
+            </div>
+            <div class="hud-read"><span>${COPY.flight.alt}</span><b id="read-alt">0 m</b></div>
           </div>
-          <div class="hud-read"><span>${COPY.flight.alt}</span><b id="read-alt">0 m</b></div>
-        </div>
-        <div class="bot">
-          <button class="btn" type="button" id="btn-left">${COPY.flight.left}</button>
-          <button class="btn" type="button" id="btn-right">${COPY.flight.right}</button>
-          <button class="btn" type="button" id="btn-stage">${COPY.flight.stage}</button>
-          <button class="btn go" type="button" id="btn-chute">${COPY.flight.chute}</button>
+          <div class="bot">
+            <button class="btn" type="button" id="btn-left">${COPY.flight.left}</button>
+            <button class="btn" type="button" id="btn-right">${COPY.flight.right}</button>
+            <button class="btn" type="button" id="btn-stage">${COPY.flight.stage}</button>
+            <button class="btn go" type="button" id="btn-chute">${COPY.flight.chute}</button>
+          </div>
         </div>
         <div id="toast" class="toast" hidden></div>
       </div>`;
@@ -888,6 +904,12 @@ export function boot() {
     else drawFlight();
   }
 
+  function horizonY(h, alt) {
+    // 自研表现：高度越高，地平线越沉出画面。不是贴在屏幕底边的色带。
+    const drop = 1 - Math.exp(-Math.max(0, alt) / 1800);
+    return h * (0.68 + 0.4 * drop);
+  }
+
   function drawSky(canvas, alt) {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
@@ -900,40 +922,63 @@ export function boot() {
     }
     const ctx = canvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const space = clamp((alt - 6000) / 24000, 0, 1);
+    const space = clamp((alt - 2500) / 14000, 0, 1);
     const g = ctx.createLinearGradient(0, 0, 0, h);
     g.addColorStop(0, mix(hex("#6eb9ea"), hex("#071018"), space));
-    g.addColorStop(0.62, mix(hex("#9fd0f2"), hex("#143044"), space));
+    g.addColorStop(0.55, mix(hex("#9fd0f2"), hex("#143044"), space));
     g.addColorStop(1, mix(hex("#d7eef8"), hex("#102030"), space));
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
-    if (space > 0.25) {
-      ctx.globalAlpha = (space - 0.25) / 0.75;
+    if (space > 0.2) {
+      ctx.globalAlpha = (space - 0.2) / 0.8;
       ctx.fillStyle = "#f4f7fb";
-      for (const star of STARS) ctx.fillRect(star.x * w, star.y * h, star.s, star.s);
+      for (const star of STARS) ctx.fillRect(star.x * w, star.y * h * 0.9, star.s, star.s);
       ctx.globalAlpha = 1;
     }
-    let ground = alt < 50 ? 0.2 : 0.165;
-    if (alt > 18000) ground = Math.max(0, 0.165 * (1 - (alt - 18000) / 14000));
-    if (ground > 0.004) {
-      const gy = h * (1 - ground);
-      const gg = ctx.createLinearGradient(0, gy, 0, h);
-      gg.addColorStop(0, "#c5d98a");
-      gg.addColorStop(0.12, "#8a9a5a");
-      gg.addColorStop(1, "#5a7d38");
+    const hy = horizonY(h, alt);
+    if (hy < h + 40) {
+      const radius = Math.max(w, h) * (1.35 + Math.min(alt, 20000) / 6000);
+      const cy = hy + radius * 0.98;
+      const gg = ctx.createRadialGradient(w / 2, hy, radius * 0.2, w / 2, cy, radius);
+      gg.addColorStop(0, "#9aaf68");
+      gg.addColorStop(0.2, "#6f8a48");
+      gg.addColorStop(1, "#3d5826");
       ctx.fillStyle = gg;
-      ctx.fillRect(0, gy, w, h - gy + 1);
+      ctx.beginPath();
+      ctx.arc(w / 2, cy, radius, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
-  function vesselSpan(vessel) {
-    let minY = 0;
-    let maxY = 0;
+  function cameraFor(vessel, w, h, alt) {
+    const att = vessel.att || 0;
+    const c = Math.cos(att);
+    const s = Math.sin(att);
+    let maxX = 4;
+    let maxY = 4;
+    let minLocalY = 0;
     for (const p of vessel.parts) {
-      minY = Math.min(minY, p.localY - p.halfH);
-      maxY = Math.max(maxY, p.localY + p.halfH);
+      minLocalY = Math.min(minLocalY, p.localY - p.halfH);
+      const corners = [
+        [p.localX - p.halfW, p.localY - p.halfH],
+        [p.localX + p.halfW, p.localY - p.halfH],
+        [p.localX - p.halfW, p.localY + p.halfH],
+        [p.localX + p.halfW, p.localY + p.halfH],
+      ];
+      for (const [lx, ly] of corners) {
+        const x = lx;
+        const y = -ly;
+        const xr = Math.abs(x * c + y * s);
+        const yr = Math.abs(-x * s + y * c);
+        maxX = Math.max(maxX, xr);
+        maxY = Math.max(maxY, yr);
+      }
     }
-    return Math.max(6, maxY - minY);
+    const ppm = clamp(Math.min((w * 0.5) / maxX, (h * 0.48) / maxY), 6, 34);
+    const tailDown = -minLocalY * ppm * Math.max(0, c);
+    const hy = horizonY(h, alt);
+    const anchorY = clamp(hy - tailDown - 10, h * 0.3, h * 0.58);
+    return { ppm, anchor: { x: w * 0.42, y: anchorY } };
   }
 
   function drawFlight() {
@@ -944,8 +989,9 @@ export function boot() {
     drawSky(canvas, alt);
     const h = canvas.clientHeight;
     const w = canvas.clientWidth;
-    const ppm = clamp(Math.min(300, h * 0.46) / vesselSpan(vessel), 6, 20);
-    const anchor = { x: w / 2, y: Math.min(h * 0.4, h - 210) };
+    const cam = cameraFor(vessel, w, h, alt);
+    const ppm = cam.ppm;
+    const anchor = cam.anchor;
     const layers = view.querySelector("#layers");
     const keep = new Set();
     for (const item of app.flight.vessels) {
@@ -977,12 +1023,14 @@ export function boot() {
     const right = { x: radial.y, y: -radial.x };
     const vUp = vessel.vx * radial.x + vessel.vy * radial.y;
     const vRt = vessel.vx * right.x + vessel.vy * right.y;
-    if (speed < 4) arrow.hidden = true;
-    else {
+    if (!shouldShowVelocityArrow(speed)) {
+      arrow.hidden = true;
+    } else {
       const ang = Math.atan2(vRt, vUp);
       arrow.hidden = false;
-      arrow.style.left = anchor.x + Math.sin(ang) * 78 + "px";
-      arrow.style.top = anchor.y - Math.cos(ang) * 78 + "px";
+      const reach = Math.min(96, Math.max(56, h * 0.12));
+      arrow.style.left = anchor.x + Math.sin(ang) * reach + "px";
+      arrow.style.top = anchor.y - Math.cos(ang) * reach + "px";
       arrow.style.transform = `translate(-50%, -50%) rotate(${ang}rad)`;
     }
     window.__TK.flight = app.flight;

@@ -284,6 +284,32 @@ function supportPad(vessel) {
   }
 }
 
+/**
+ * 还没飞离发射台时贴地。直立且慢，就托住。
+ * 倾倒，或贴地速度已经很大，直接坠毁，不能沿地面滑行。
+ */
+function padContact(state, vessel) {
+  if (state.leftPad || !vessel.controllable) return null;
+  const agl = lowestAGL(vessel);
+  if (agl > 1.6) return null;
+  const spd = speedOf(vessel);
+  const tipped = Math.abs(wrap(vessel.att)) > LANDING.tipCrash;
+  if (tipped || spd > LANDING.padSlideSpeed) {
+    vessel.vx = 0;
+    vessel.vy = 0;
+    vessel.omega = 0;
+    state.outcome = "crash";
+    return "crash";
+  }
+  supportPad(vessel);
+  return "supported";
+}
+
+/** 静止或刚离台的慢速不画速度箭头，避免 0 m/s 时箭头穿过箭体。 */
+export function shouldShowVelocityArrow(speed) {
+  return speed >= 12;
+}
+
 function touchdown(state, vessel) {
   const b = basis(vessel);
   const vr = vessel.vx * b.radial.x + vessel.vy * b.radial.y;
@@ -367,10 +393,10 @@ function stepVessel(vessel, state, input, dt, isActive) {
   if (isActive && !input.left && !input.right) vessel.omega *= Math.exp(-CONTROL.damp * dt);
   vessel.att = wrap(vessel.att + vessel.omega * dt);
 
-  // 还没飞离发射台时，只在贴地的一小段里托住，避免没离地就被判坠毁。
-  if (!state.leftPad && isActive && vessel.controllable && lowestAGL(vessel) < 1.2) {
-    supportPad(vessel);
-    return null;
+  if (isActive) {
+    const pad = padContact(state, vessel);
+    if (pad === "crash") return "crash";
+    if (pad === "supported") return null;
   }
 
   const agl = lowestAGL(vessel);
