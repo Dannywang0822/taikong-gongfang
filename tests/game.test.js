@@ -152,6 +152,13 @@ test("part taps are not covered by the empty node layer", () => {
   assert.match(css, /\.sprite\s*\{[^}]*pointer-events:\s*auto/);
 });
 
+test("portrait layout is opt-in and landscape home stays a row", () => {
+  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8");
+  assert.match(css, /@media \(orientation: portrait\)/);
+  assert.match(css, /\.home-safe,\s*\.world-safe\s*\{\s*flex-direction:\s*row/);
+  assert.match(css, /env\(safe-area-inset-bottom\)/);
+});
+
 test("tipping over on the pad crashes instead of sliding", () => {
   let state = createFlight(compileVessel(hopRocket()));
   for (let i = 0; i < 240 && !state.outcome; i += 1) {

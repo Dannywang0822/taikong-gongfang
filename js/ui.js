@@ -77,6 +77,7 @@ export function boot() {
     selected: null,
     detach: false,
     view: { zoom: 1, panX: 40, panY: 40, manual: false },
+    wasPortrait: typeof window !== "undefined" && window.innerHeight > window.innerWidth,
     flight: null,
     cam: { zoom: 1, map: false },
     auto: false,
@@ -1158,6 +1159,13 @@ export function boot() {
   window.addEventListener("keyup", onKey);
   window.addEventListener("beforeunload", () => {
     if (app.screen === "flight") saveFlight();
+  });
+  window.addEventListener("resize", () => {
+    const portrait = window.innerHeight > window.innerWidth;
+    if (portrait !== app.wasPortrait && app.screen === "build") app.view.manual = false;
+    app.wasPortrait = portrait;
+    if (app.screen === "build") drawBuild();
+    else if (app.screen === "flight") drawFlight();
   });
 
   window.__TK = {

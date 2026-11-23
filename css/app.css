@@ -519,3 +519,150 @@ img { user-select: none; -webkit-user-drag: none; }
   .hud-read b { font-size: 12px; }
   .home-main, .world-side { width: min(280px, 40vw); }
 }
+
+/* 竖屏：只在高大于宽时改排布。横屏规则保持原样。转向只改样式，不重建飞行状态。 */
+@media (orientation: portrait) {
+  .safe {
+    padding:
+      max(12px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+  }
+  .home-safe {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .home-stage { flex: 0 1 auto; min-height: 0; }
+  .home-hero {
+    height: min(30vh, 240px);
+    margin: 0;
+    flex: none;
+  }
+  .home-hero img { height: 100%; max-width: 42%; }
+  .brand h2 { font-size: 24px; letter-spacing: 0.12em; }
+  .home-main, .world-side {
+    width: 100%;
+    max-width: none;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .home-main .btn, .world-side .btn, .sec, .frame {
+    min-height: 48px;
+    height: auto;
+  }
+  .sec { padding: 8px 10px; white-space: nowrap; }
+  .frame { min-height: 44px; }
+
+  .world-body { flex-direction: column; gap: 10px; }
+  .world-list { margin-top: 4px; }
+  .world-side { flex: 0 0 auto; justify-content: flex-start; }
+  .world { min-height: 56px; }
+
+  #screen-build .topbar { height: 40px; }
+  #screen-build .tools {
+    position: absolute;
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    top: auto;
+    margin: 0;
+    z-index: 6;
+    display: flex;
+    gap: 6px;
+  }
+  #screen-build .tools .iconbtn {
+    flex: 1;
+    height: 48px;
+    min-width: 0;
+    font-size: 15px;
+    border-radius: 24px;
+  }
+  .build-body { flex-direction: column; gap: 8px; }
+  .picker {
+    width: 100%;
+    height: min(36vh, 300px);
+    min-height: 176px;
+    margin-bottom: 56px;
+  }
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(72px, 1fr));
+  }
+  .cell { min-height: 72px; padding: 4px 2px 6px; }
+  .cell em { font-size: 11px; line-height: 1.2; white-space: nowrap; }
+  .states { min-height: 52px; }
+  .state { font-size: 11px; }
+  .msg { height: auto; min-height: 36px; line-height: 1.3; }
+
+  .fuelchip {
+    top: max(10px, env(safe-area-inset-top));
+    left: max(10px, env(safe-area-inset-left));
+    max-width: calc(100% - 92px);
+  }
+  #flight-menu {
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    height: 36px;
+    min-width: 52px;
+  }
+  .auto-btn {
+    top: calc(max(10px, env(safe-area-inset-top)) + 50px);
+    left: max(10px, env(safe-area-inset-left));
+    right: auto;
+    height: 40px;
+    min-width: 76px;
+    padding: 0 10px;
+  }
+  .orbit-read {
+    top: calc(max(10px, env(safe-area-inset-top)) + 50px);
+    left: calc(max(10px, env(safe-area-inset-left)) + 92px);
+    right: max(8px, env(safe-area-inset-right));
+    width: auto;
+    transform: none;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .orbit-read .hud-read {
+    min-width: 0;
+    flex: 1 1 72px;
+    padding: 6px 6px;
+  }
+  .orbit-read .hud-read b { font-size: 12px; white-space: nowrap; }
+  .orbit-read .menu {
+    position: static;
+    height: 40px;
+    min-width: 44px;
+    flex: 1 1 44px;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+  .flight-bar {
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .hud-dock { justify-content: space-between; width: 100%; }
+  .hud-dock .hud-read { flex: 1; min-width: 0; }
+  .thr-ring { width: 84px; height: 84px; }
+  .thr-core { width: 60px; height: 60px; }
+  .bot { width: 100%; }
+  .bot .btn { height: 52px; min-height: 48px; font-size: 16px; }
+  #screen-flight .toast {
+    bottom: calc(168px + env(safe-area-inset-bottom));
+    max-width: calc(100% - 24px);
+  }
+  .modal {
+    width: min(92vw, 360px);
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)) - 24px);
+    overflow: auto;
+    margin-top: max(0px, env(safe-area-inset-top));
+  }
+  .modal .btn { min-height: 48px; height: auto; }
+  .modal h4, .modal p { overflow-wrap: anywhere; }
+}
