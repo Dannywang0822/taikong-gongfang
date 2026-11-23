@@ -3,7 +3,8 @@
  * 吸附、燃料是否够飞、分离顺序都是自研规则，不是已证实的官方手势。
  */
 
-import { PLANET, SCALE, getPart } from "./data.js";
+import { HOME } from "./bodies.js";
+import { SCALE, getPart } from "./data.js";
 
 const STACK_OVERLAP = 4;
 const SIDE_OVERLAP = 8;
@@ -187,12 +188,17 @@ export function drawOrder(parts) {
   return core.concat(sides);
 }
 
+export function wetMassOf(def) {
+  return def.wetMass + (def.rcsFuel || 0);
+}
+
+export function fuelCapacity(def) {
+  return Math.max(0, (1 - def.dryMassPercent) * def.wetMass);
+}
+
 function massOf(parts) {
   let m = 0;
-  for (const p of parts) {
-    const d = getPart(p.defId);
-    m += d.dry + (d.fuel || 0);
-  }
+  for (const p of parts) m += wetMassOf(getPart(p.defId));
   return m;
 }
 
@@ -214,8 +220,8 @@ export function buildStatus(parts) {
   const hasPod = defs.some((d) => d.role === "pod");
   const hasEngine = defs.some((d) => d.role === "engine");
   const hasBooster = defs.some((d) => d.role === "booster");
-  const hasLiquid = defs.some((d) => d.fuelType === "liquid" && d.fuel > 0);
-  const hasSolid = defs.some((d) => d.fuelType === "solid" && d.fuel > 0);
+  const hasLiquid = defs.some((d) => d.fuelType === "liquid" && fuelCapacity(d) > 0);
+  const hasSolid = defs.some((d) => d.fuelType === "solid" && fuelCapacity(d) > 0);
   if (!hasPod) return { ok: false, code: "no-pod", text: "还没有指令舱。" };
   if (!hasEngine && !hasBooster) {
     return { ok: false, code: "no-engine", text: "还没有发动机或固体助推。" };
@@ -225,7 +231,7 @@ export function buildStatus(parts) {
   }
   const mass = massOf(parts);
   const thrust = thrustOf(parts);
-  const twr = mass > 0 ? thrust / (mass * PLANET.g) : 0;
+  const twr = mass > 0 ? thrust / mass : 0;
   if (twr < 1) {
     return {
       ok: true,
@@ -302,23 +308,32 @@ export function compileVessel(buildParts) {
     const ocy = (d.opaque.t + d.opaque.b) / 2;
     const wx = box.x + ocx;
     const wy = box.y + ocy;
+    const cap = fuelCapacity(d);
     return {
       uid: p.uid,
       defId: p.defId,
       role: d.role,
-      fuelType: d.fuelType,
+      fuelType: cap > 0 ? d.fuelType : null,
       localX: (wx - podCx) * m,
       localY: -(wy - podCy) * m,
       halfW: ((d.opaque.r - d.opaque.l) / 2) * m,
       halfH: ((d.opaque.b - d.opaque.t) / 2) * m,
-      dry: d.dry,
-      fuel: d.fuel || 0,
-      fuelMax: d.fuel || 0,
+      dryMass: d.dryMassPercent * d.wetMass,
+      fuel: cap,
+      fuelMax: cap,
+      resourceMass: 1,
       thrust: d.thrust || 0,
       isp: d.isp || 1,
+      impact: d.impact || "medium",
+      gimbal: !!d.gimbal,
+      wheel: !!d.wheel,
+      rcs: !!d.rcs,
+      rcsFuel: d.rcsFuel || 0,
+      rcsFuelMax: d.rcsFuel || 0,
       parentUid: p.parentUid,
       link: p.link,
       ignited: false,
+      dead: false,
       flip: !!box.flip,
       spriteW: d.w,
       spriteH: d.h,
@@ -331,15 +346,17 @@ export function compileVessel(buildParts) {
   });
   return {
     id: "v" + Math.floor(Math.random() * 1e9).toString(36),
+    bodyId: HOME.id,
     x: 0,
     y: 0,
     vx: 0,
     vy: 0,
     att: 0,
     omega: 0,
-    chute: parts.some((p) => p.role === "chute") ? "stow" : "none",
-    chuteT: 0,
+    chuteTarget: parts.some((p) => p.role === "chute") ? 0 : -1,
+    chuteState: 0,
     controllable: true,
+    throttle: 0,
     parts,
   };
 }
@@ -395,9 +412,9 @@ export function bareRocket() {
 }
 
 export const RULES_NOTE = {
-  source: "估计",
-  attach: "网格吸附是自研接口，不是已证实的官方磁吸规则。",
+  source: "原创",
+  attach: "接口吸附是自研连接图。",
   fuel: "分离前，同一艘火箭上的液体燃料可以供给液体发动机。分离之后各飞各的。",
-  physics: "重力、推力、阻力和开伞都是估计模型。",
+  physics: "重力、开普勒、大气、推力和开伞按参考规则原创实现。零件数值和姿态力矩是调出来的。",
 };
 

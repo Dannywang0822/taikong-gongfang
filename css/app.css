@@ -356,6 +356,24 @@ img { user-select: none; -webkit-user-drag: none; }
   font-size: 11px;
   font-weight: 800;
 }
+.orbit-read {
+  position: absolute;
+  left: 50%;
+  top: max(10px, env(safe-area-inset-top));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 3;
+}
+.orbit-read .menu { position: static; }
+.orbit-read .hud-read { min-width: 72px; padding: 6px 8px; }
+.orbit-read .menu.on { background: #2f6db3; color: #fff; }
+.auto-btn {
+  left: max(10px, env(safe-area-inset-left));
+  right: auto;
+  top: max(58px, calc(env(safe-area-inset-top) + 46px));
+}
 .flight-bar {
   position: absolute;
   left: 12px;
