@@ -57,6 +57,27 @@ function screenAngle(dx, dy, cam) {
   return Math.atan2(lx, ly);
 }
 
+export function craftHeight(vessel) {
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const part of vessel.parts || []) {
+    if (part.dead) continue;
+    minY = Math.min(minY, part.localY - part.halfH);
+    maxY = Math.max(maxY, part.localY + part.halfH);
+  }
+  if (!Number.isFinite(minY)) return 12;
+  return Math.max(4, maxY - minY);
+}
+
+/**
+ * 飞行视图始终画零件贴图。船在屏幕上矮于 8 像素时才额外加定位点，
+ * 这个点不代替贴图。地图上的小三角也只是叠加的轨道图标。
+ */
+export function vesselPresentation(ppm, heightM) {
+  const pixels = Math.max(0, ppm) * Math.max(heightM || 1, 1);
+  return { sprites: true, marker: pixels < 8 };
+}
+
 export function cameraFor(info, w, h, cam) {
   const zoom = cam.zoom || 1;
   const body = info.body;
@@ -72,10 +93,11 @@ export function cameraFor(info, w, h, cam) {
     };
   }
   const alt = Math.max(info.radialAlt, 1);
+  const heightM = craftHeight(info.vessel);
   let ppm;
   if (alt < 220) ppm = 12;
   else if (alt < 3500) ppm = Math.max(4.5, 12 * (220 / alt) ** 0.55);
-  else ppm = (Math.min(w, h) * 0.42) / (alt + body.radius * 0.05);
+  else ppm = Math.max(72 / heightM, 4.5 * (3500 / alt) ** 0.45);
   ppm = clamp(ppm * zoom, Math.min(w, h) / (body.radius * 14), 42);
   const vessel = info.vessel;
   const dist = Math.hypot(vessel.x, vessel.y) || 1;
@@ -247,15 +269,12 @@ function spriteOf(part, vessel, thrusting) {
   return { src: part.src, w: part.spriteW, h: part.spriteH, ocx: part.ocx, ocy: part.ocy };
 }
 
-function drawVessel(ctx, vessel, cam, w, h, thrusting) {
-  const basis = vesselBasis(vessel);
-  const origin = worldToScreen(vessel.x, vessel.y, cam, w, h);
-  const nose = screenAngle(basis.nose.x, basis.nose.y, cam);
-  const mark = cam.ppm < 0.02;
-  if (mark) {
-    ctx.save();
-    ctx.translate(origin.x, origin.y);
-    ctx.rotate(nose);
+function drawLocator(ctx, x, y, angle, map) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.lineWidth = 1.5;
+  if (map) {
     ctx.fillStyle = "#fff4d2";
     ctx.beginPath();
     ctx.moveTo(0, -7);
@@ -263,28 +282,45 @@ function drawVessel(ctx, vessel, cam, w, h, thrusting) {
     ctx.lineTo(-4.5, 6);
     ctx.closePath();
     ctx.fill();
-    ctx.restore();
-    return;
+  } else {
+    ctx.strokeStyle = "#fff4d2";
+    ctx.beginPath();
+    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+    ctx.moveTo(0, -9);
+    ctx.lineTo(0, -4);
+    ctx.stroke();
   }
+  ctx.restore();
+}
+
+function drawVessel(ctx, vessel, cam, w, h, thrusting) {
+  const basis = vesselBasis(vessel);
+  const origin = worldToScreen(vessel.x, vessel.y, cam, w, h);
+  const nose = screenAngle(basis.nose.x, basis.nose.y, cam);
+  const heightM = craftHeight(vessel);
+  const view = vesselPresentation(cam.ppm, heightM);
   const parts = vessel.parts.filter((p) => !p.dead);
   parts.sort((a, b) => (a.role === "booster" ? 1 : 0) - (b.role === "booster" ? 1 : 0));
-  for (const part of parts) {
-    const at = localToWorld(vessel, basis, part.localX, part.localY);
-    const s = worldToScreen(at.x, at.y, cam, w, h);
-    const spec = spriteOf(part, vessel, thrusting && vessel.controllable);
-    const m = SCALE.mPerPx * cam.ppm;
-    const img = imageFor(spec.src);
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    ctx.rotate(nose);
-    if (part.flip) ctx.scale(-1, 1);
-    if (img) ctx.drawImage(img, -spec.ocx * m, -spec.ocy * m, spec.w * m, spec.h * m);
-    else {
-      ctx.fillStyle = part.role === "engine" ? "#c4552a" : "#d5deea";
-      ctx.fillRect(-part.halfW * cam.ppm, -part.halfH * cam.ppm, part.halfW * 2 * cam.ppm, part.halfH * 2 * cam.ppm);
+  if (view.sprites) {
+    for (const part of parts) {
+      const at = localToWorld(vessel, basis, part.localX, part.localY);
+      const s = worldToScreen(at.x, at.y, cam, w, h);
+      const spec = spriteOf(part, vessel, thrusting && vessel.controllable);
+      const m = SCALE.mPerPx * cam.ppm;
+      const img = imageFor(spec.src);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(nose);
+      if (part.flip) ctx.scale(-1, 1);
+      if (img) ctx.drawImage(img, -spec.ocx * m, -spec.ocy * m, spec.w * m, spec.h * m);
+      else {
+        ctx.fillStyle = part.role === "engine" ? "#c4552a" : "#d5deea";
+        ctx.fillRect(-part.halfW * cam.ppm, -part.halfH * cam.ppm, part.halfW * 2 * cam.ppm, part.halfH * 2 * cam.ppm);
+      }
+      ctx.restore();
     }
-    ctx.restore();
   }
+  if (view.marker) drawLocator(ctx, origin.x, origin.y, nose, cam.map);
 }
 
 function drawVelocity(ctx, vessel, cam, w, h) {

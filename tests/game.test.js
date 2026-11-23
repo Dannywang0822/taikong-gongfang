@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
+import { cameraFor, vesselPresentation } from "../js/flightview.js";
+import { HOME } from "../js/bodies.js";
 import { COPY, LANDING, PICKER } from "../js/data.js";
 import {
   artRocket,
@@ -150,6 +152,47 @@ test("part taps are not covered by the empty node layer", () => {
   assert.match(css, /#nodes\s*\{[^}]*pointer-events:\s*none/);
   assert.match(css, /\.node\s*\{[^}]*pointer-events:\s*auto/);
   assert.match(css, /\.sprite\s*\{[^}]*pointer-events:\s*auto/);
+});
+
+test("flight view keeps part sprites instead of swapping in a triangle", () => {
+  const src = readFileSync(new URL("../js/flightview.js", import.meta.url), "utf8");
+  assert.match(src, /sprites:\s*true/);
+  assert.doesNotMatch(src, /ppm\s*<\s*0\.02/);
+  assert.doesNotMatch(src, /if\s*\(\s*mark\s*\)/);
+  const height = 18;
+  for (const ppm of [12, 4.5, 3.2, 0.2, 0.02, 0.008, 0.001]) {
+    assert.equal(vesselPresentation(ppm, height).sprites, true, "ppm " + ppm);
+  }
+  assert.equal(vesselPresentation(3.2, height).marker, false);
+  assert.equal(vesselPresentation(0.008, height).marker, true);
+  const vessel = {
+    x: 0,
+    y: HOME.radius + 28000,
+    parts: [
+      { localY: 4, halfH: 2, dead: false },
+      { localY: -6, halfH: 4, dead: false },
+    ],
+  };
+  const info = {
+    radialAlt: 28000,
+    apoAlt: 74000,
+    body: HOME,
+    vessel,
+  };
+  for (const size of [
+    [390, 844],
+    [1280, 720],
+  ]) {
+    const cam = cameraFor(info, size[0], size[1], { zoom: 1, map: false });
+    const tall = (4 + 2 + 6 + 4);
+    assert.ok(cam.ppm * tall >= 64, size.join("x") + " ppm " + cam.ppm);
+    assert.equal(vesselPresentation(cam.ppm, tall).sprites, true);
+    assert.equal(vesselPresentation(cam.ppm, tall).marker, false);
+    assert.equal(cam.map, false);
+  }
+  const mapped = cameraFor(info, 1280, 720, { zoom: 1, map: true });
+  assert.equal(mapped.map, true);
+  assert.equal(vesselPresentation(mapped.ppm, 16).sprites, true);
 });
 
 test("portrait layout is opt-in and landscape home stays a row", () => {
