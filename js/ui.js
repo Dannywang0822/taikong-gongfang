@@ -1011,13 +1011,22 @@ export function boot() {
   }
 
   function runGuide(phase) {
-    const limit = { airborne: 6000, orbit: 90000, chute: 140000, land: 170000 }[phase] || 4000;
+    const limit = {
+      airborne: 6000,
+      orbit: 90000,
+      atmo: 140000,
+      dive: 155000,
+      chute: 165000,
+      land: 175000,
+    }[phase] || 4000;
     app.auto = true;
     if (!app.autoMode) app.autoMode = "ascend";
     for (let i = 0; i < limit && app.flight && !app.flight.outcome; i += 1) {
       const info = flightInfo(app.flight);
       if (phase === "airborne" && info && info.radialAlt > 32 && info.speed > 18) break;
       if (phase === "orbit" && info && info.inOrbit && app.autoMode === "ascend") break;
+      if (phase === "atmo" && info && info.vUp < 0 && info.radialAlt < info.body.atmosphereHeight && info.radialAlt > 24000) break;
+      if (phase === "dive" && info && info.vUp < -20 && info.speed > 180 && info.radialAlt < 16000 && info.radialAlt > 6000 && info.chuteState < 0.15) break;
       if (phase === "chute" && info && info.chuteState > 0.45) break;
       const input = guidedInput();
       app.throttle = input.throttle;
