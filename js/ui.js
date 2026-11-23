@@ -1,4 +1,6 @@
-import { CHUTE_STATES, COPY, PICKER, SCALE, getPart } from "./data.js";
+import { CHUTE_STATES, COPY, PICKER, getPart } from "./data.js";
+import { drawScene, loadImages, partImageUrls } from "./flightview.js";
+import { guideInput, vesselHasEngine } from "./guide.js";
 import {
   buildStatus,
   canRoot,
@@ -12,12 +14,10 @@ import {
 } from "./rocket.js";
 import {
   createFlight,
+  flightInfo,
   formatAlt,
   formatSpeed,
   fuelFrac,
-  lowestAGL,
-  shouldShowVelocityArrow,
-  speedOf,
   step,
 } from "./sim.js";
 import { store } from "./store.js";
@@ -78,6 +78,10 @@ export function boot() {
     detach: false,
     view: { zoom: 1, panX: 40, panY: 40, manual: false },
     flight: null,
+    cam: { zoom: 1, map: false },
+    auto: false,
+    autoMode: "ascend",
+    pointers: new Map(),
     throttle: 0,
     hold: { left: false, right: false },
     keys: { left: false, right: false, up: false, down: false },
@@ -187,8 +191,10 @@ export function boot() {
   }
 
   function openCrash() {
+    const reason = app.flight && app.flight.crashReason === "tip" ? COPY.fail.tip : COPY.fail.terrain;
     showOverlay(`
       <h4>${COPY.fail.title}</h4>
+      <p>${reason}</p>
       <p>${COPY.fail.body}</p>
       <button class="btn primary" type="button" data-act="retry">${COPY.fail.retry}</button>
       <button class="btn" type="button" data-act="to-build">${COPY.fail.end}</button>
@@ -240,6 +246,7 @@ export function boot() {
     app.keys.down = false;
     app.edge.separate = false;
     app.edge.deploy = false;
+    app.edge.warp = 0;
   }
 
   function openWorld(id, mode) {
@@ -750,6 +757,15 @@ export function boot() {
           <path d="M16 27 L27 12 L38 27" stroke="#1a2430" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <div class="fuelchip"><b>${COPY.flight.fuel}</b><div class="fuelbar"><i id="fuel-fill"></i></div></div>
+        <div class="orbit-read">
+          <div class="hud-read"><span>${COPY.flight.peri}</span><b id="read-peri">—</b></div>
+          <div class="hud-read"><span>${COPY.flight.apo}</span><b id="read-apo">—</b></div>
+          <button class="menu" type="button" id="warp-down">${COPY.flight.warpDown}</button>
+          <button class="menu" type="button" id="warp-label">×1</button>
+          <button class="menu" type="button" id="warp-up">${COPY.flight.warpUp}</button>
+          <button class="menu" type="button" id="map-toggle">${COPY.flight.map}</button>
+        </div>
+        <button class="menu auto-btn" type="button" id="auto-flight">${COPY.flight.auto}</button>
         <button class="menu" type="button" id="flight-menu">${COPY.flight.menu}</button>
         <div class="flight-bar">
           <div class="hud-dock">
@@ -777,12 +793,36 @@ export function boot() {
     holdButton(view.querySelector("#btn-right"), "right");
     view.querySelector("#btn-stage").addEventListener("pointerdown", (e) => {
       e.preventDefault();
+      stopAuto();
       app.edge.separate = true;
     });
     view.querySelector("#btn-chute").addEventListener("pointerdown", (e) => {
       e.preventDefault();
+      stopAuto();
       app.edge.deploy = true;
     });
+    view.querySelector("#warp-down").addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      app.edge.warp = (app.edge.warp || 0) - 1;
+    });
+    view.querySelector("#warp-up").addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      app.edge.warp = (app.edge.warp || 0) + 1;
+    });
+    view.querySelector("#map-toggle").addEventListener("click", () => {
+      app.cam.map = !app.cam.map;
+      view.querySelector("#map-toggle").classList.toggle("on", app.cam.map);
+    });
+    view.querySelector("#auto-flight").addEventListener("click", () => {
+      if (app.auto) stopAuto();
+      else beginAuto();
+    });
+    const canvas = view.querySelector("#sky");
+    canvas.addEventListener("wheel", onFlightWheel, { passive: false });
+    canvas.addEventListener("pointerdown", onFlightPointer);
+    canvas.addEventListener("pointermove", onFlightPointer);
+    canvas.addEventListener("pointerup", onFlightPointer);
+    canvas.addEventListener("pointercancel", onFlightPointer);
     bindThrottle(view.querySelector("#thr"));
     app.lastTs = 0;
     app.raf = requestAnimationFrame(loop);
@@ -790,6 +830,7 @@ export function boot() {
 
   function holdButton(btn, key) {
     const down = (e) => {
+      stopAuto();
       app.hold[key] = true;
       btn.classList.add("held");
       btn.setPointerCapture(e.pointerId);
@@ -816,6 +857,7 @@ export function boot() {
     };
     ring.paint = paint;
     ring.addEventListener("pointerdown", (e) => {
+      stopAuto();
       drag = { y: e.clientY, t: app.throttle, id: e.pointerId };
       ring.setPointerCapture(e.pointerId);
     });
@@ -843,17 +885,15 @@ export function boot() {
     app.lastTs = ts;
     const paused = !overlay.hidden || app.flight.outcome;
     if (!paused) {
-      if (app.keys.up) app.throttle = clamp(app.throttle + dt * 0.5, 0, 1);
-      if (app.keys.down) app.throttle = clamp(app.throttle - dt * 0.5, 0, 1);
-      const input = {
-        throttle: app.throttle,
-        left: app.hold.left || app.keys.left,
-        right: app.hold.right || app.keys.right,
-        separate: app.edge.separate,
-        deploy: app.edge.deploy,
-      };
+      if (!app.auto) {
+        if (app.keys.up) app.throttle = clamp(app.throttle + dt * 0.55, 0, 1);
+        if (app.keys.down) app.throttle = clamp(app.throttle - dt * 0.55, 0, 1);
+      }
+      const input = app.auto ? guidedInput() : playerInput();
+      if (app.auto) app.throttle = input.throttle;
       app.edge.separate = false;
       app.edge.deploy = false;
+      app.edge.warp = 0;
       const result = step(app.flight, input, dt);
       app.flight = result.state;
       for (const ev of result.events) onFlightEvent(ev);
@@ -904,234 +944,175 @@ export function boot() {
     else drawFlight();
   }
 
+  function stopAuto() {
+    if (!app.auto) return;
+    app.auto = false;
+    const btn = view.querySelector("#auto-flight");
+    if (btn) btn.textContent = COPY.flight.auto;
+  }
+
+  function beginAuto() {
+    const info = app.flight && flightInfo(app.flight);
+    app.auto = true;
+    if (info && info.inOrbit) app.autoMode = "deorbit";
+    else if (info && info.periAlt < 14000 && info.radialAlt > 4000 && !vesselHasEngine(info.vessel)) app.autoMode = "reentry";
+    else app.autoMode = "ascend";
+    const btn = view.querySelector("#auto-flight");
+    if (btn) btn.textContent = COPY.flight.manual;
+    toast(COPY.flight.autoOn);
+  }
+
+  function advanceAutoMode() {
+    const info = flightInfo(app.flight);
+    if (!info) return;
+    if (app.autoMode === "ascend" && info.inOrbit) app.autoMode = "deorbit";
+    if (app.autoMode === "deorbit" && info.periAlt < 11000 && !vesselHasEngine(info.vessel)) app.autoMode = "reentry";
+  }
+
+  function guidedInput() {
+    advanceAutoMode();
+    return guideInput(app.flight, app.autoMode);
+  }
+
+  function playerInput() {
+    return {
+      throttle: app.throttle,
+      left: app.hold.left || app.keys.left,
+      right: app.hold.right || app.keys.right,
+      separate: app.edge.separate,
+      deploy: app.edge.deploy,
+      warpDelta: app.edge.warp || 0,
+    };
+  }
+
+  function onFlightWheel(e) {
+    e.preventDefault();
+    app.cam.zoom = clamp(app.cam.zoom * (e.deltaY < 0 ? 1.12 : 0.9), 0.08, 12);
+  }
+
+  function onFlightPointer(e) {
+    if (e.type === "pointerdown") app.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    else if (e.type === "pointermove") {
+      if (app.pointers.has(e.pointerId)) app.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (app.pointers.size === 2) {
+        const [a, b] = [...app.pointers.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (app.pinch) {
+          const ratio = dist / app.pinch;
+          app.cam.zoom = clamp(app.cam.zoom * ratio, 0.08, 12);
+        }
+        app.pinch = dist;
+      }
+    } else {
+      app.pointers.delete(e.pointerId);
+      if (app.pointers.size < 2) app.pinch = 0;
+    }
+  }
+
+  function runGuide(phase) {
+    const limit = { airborne: 6000, orbit: 90000, chute: 140000, land: 170000 }[phase] || 4000;
+    app.auto = true;
+    if (!app.autoMode) app.autoMode = "ascend";
+    for (let i = 0; i < limit && app.flight && !app.flight.outcome; i += 1) {
+      const info = flightInfo(app.flight);
+      if (phase === "airborne" && info && info.radialAlt > 32 && info.speed > 18) break;
+      if (phase === "orbit" && info && info.inOrbit && app.autoMode === "ascend") break;
+      if (phase === "chute" && info && info.chuteState > 0.45) break;
+      const input = guidedInput();
+      app.throttle = input.throttle;
+      const result = step(app.flight, input, 1 / 30);
+      app.flight = result.state;
+      if (phase === "land" && app.flight.outcome) {
+        for (const ev of result.events) onFlightEvent(ev);
+        break;
+      }
+      if (app.flight.outcome && phase !== "land") break;
+    }
+    if (app.flight && app.flight.outcome === "land") {
+      const landed = app.flight;
+      if (!view.querySelector(".modal")) onFlightEvent({ type: "land" });
+      app.flight = landed;
+    }
+    drawFlight();
+    return snapshot();
+  }
+
+  function crashDive() {
+    if (app.screen !== "flight") return snapshot();
+    hideOverlay();
+    const vessel = app.flight && app.flight.vessels.find((v) => v.id === app.flight.activeId);
+    if (!vessel) return snapshot();
+    const r = Math.hypot(vessel.x, vessel.y) || 1;
+    const bodyR = flightInfo(app.flight).body.radius;
+    vessel.x = (vessel.x / r) * (bodyR + 50);
+    vessel.y = (vessel.y / r) * (bodyR + 50);
+    vessel.vx = (-vessel.x / r) * 280;
+    vessel.vy = (-vessel.y / r) * 280;
+    vessel.omega = 0;
+    app.flight.outcome = null;
+    app.flight.pendingFailure = null;
+    app.flight.leftPad = true;
+    app.flight.warpIndex = 0;
+    app.auto = false;
+    app.cam.map = false;
+    app.cam.zoom = 1;
+    for (let i = 0; i < 160 && !app.flight.outcome; i += 1) {
+      const result = step(app.flight, playerInput(), 0.05);
+      app.flight = result.state;
+      if (app.flight.outcome) {
+        for (const ev of result.events) onFlightEvent(ev);
+      }
+    }
+    drawFlight();
+    return snapshot();
+  }
+
+  function snapshot() {
+    const info = app.flight ? flightInfo(app.flight) : null;
+    const modal = view.querySelector(".modal h4") || document.querySelector("#overlay h4");
+    return {
+      screen: app.screen,
+      outcome: app.flight ? app.flight.outcome : null,
+      reason: app.flight ? app.flight.crashReason : null,
+      title: modal ? modal.textContent : "",
+      alt: info ? info.radialAlt : null,
+      speed: info ? info.speed : null,
+      peri: info ? info.periAlt : null,
+      apo: info ? info.apoAlt : null,
+      chute: info ? info.chuteState : null,
+      map: app.cam.map,
+      warp: info ? info.warpSpeed : null,
+    };
+  }
+
   function horizonY(h, alt) {
-    // 自研表现：高度越高，地平线越沉出画面。不是贴在屏幕底边的色带。
     const drop = 1 - Math.exp(-Math.max(0, alt) / 1800);
     return h * (0.68 + 0.4 * drop);
   }
 
-  function drawSky(canvas, alt) {
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const pw = Math.max(1, Math.floor(w * dpr));
-    const ph = Math.max(1, Math.floor(h * dpr));
-    if (canvas.width !== pw || canvas.height !== ph) {
-      canvas.width = pw;
-      canvas.height = ph;
-    }
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const space = clamp((alt - 2500) / 14000, 0, 1);
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, mix(hex("#6eb9ea"), hex("#071018"), space));
-    g.addColorStop(0.55, mix(hex("#9fd0f2"), hex("#143044"), space));
-    g.addColorStop(1, mix(hex("#d7eef8"), hex("#102030"), space));
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-    if (space > 0.2) {
-      ctx.globalAlpha = (space - 0.2) / 0.8;
-      ctx.fillStyle = "#f4f7fb";
-      for (const star of STARS) ctx.fillRect(star.x * w, star.y * h * 0.9, star.s, star.s);
-      ctx.globalAlpha = 1;
-    }
-    const hy = horizonY(h, alt);
-    if (hy < h + 40) {
-      const radius = Math.max(w, h) * (1.35 + Math.min(alt, 20000) / 6000);
-      const cy = hy + radius * 0.98;
-      const gg = ctx.createRadialGradient(w / 2, hy, radius * 0.2, w / 2, cy, radius);
-      gg.addColorStop(0, "#9aaf68");
-      gg.addColorStop(0.2, "#6f8a48");
-      gg.addColorStop(1, "#3d5826");
-      ctx.fillStyle = gg;
-      ctx.beginPath();
-      ctx.arc(w / 2, cy, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function cameraFor(vessel, w, h, alt) {
-    const att = vessel.att || 0;
-    const c = Math.cos(att);
-    const s = Math.sin(att);
-    let maxX = 4;
-    let maxY = 4;
-    let minLocalY = 0;
-    for (const p of vessel.parts) {
-      minLocalY = Math.min(minLocalY, p.localY - p.halfH);
-      const corners = [
-        [p.localX - p.halfW, p.localY - p.halfH],
-        [p.localX + p.halfW, p.localY - p.halfH],
-        [p.localX - p.halfW, p.localY + p.halfH],
-        [p.localX + p.halfW, p.localY + p.halfH],
-      ];
-      for (const [lx, ly] of corners) {
-        const x = lx;
-        const y = -ly;
-        const xr = Math.abs(x * c + y * s);
-        const yr = Math.abs(-x * s + y * c);
-        maxX = Math.max(maxX, xr);
-        maxY = Math.max(maxY, yr);
-      }
-    }
-    const ppm = clamp(Math.min((w * 0.5) / maxX, (h * 0.48) / maxY), 6, 34);
-    const tailDown = -minLocalY * ppm * Math.max(0, c);
-    const hy = horizonY(h, alt);
-    const anchorY = clamp(hy - tailDown - 10, h * 0.3, h * 0.58);
-    return { ppm, anchor: { x: w * 0.42, y: anchorY } };
-  }
-
   function drawFlight() {
     const canvas = view.querySelector("#sky");
-    const vessel = app.flight && app.flight.vessels.find((v) => v.id === app.flight.activeId);
-    if (!canvas || !vessel) return;
-    const alt = Math.max(0, lowestAGL(vessel));
-    drawSky(canvas, alt);
-    const h = canvas.clientHeight;
-    const w = canvas.clientWidth;
-    const cam = cameraFor(vessel, w, h, alt);
-    const ppm = cam.ppm;
-    const anchor = cam.anchor;
+    const info = app.flight && flightInfo(app.flight);
+    if (!canvas || !info) return;
+    drawScene(canvas, app.flight, app.cam);
     const layers = view.querySelector("#layers");
-    const keep = new Set();
-    for (const item of app.flight.vessels) {
-      keep.add(item.id);
-      let layer = layers.querySelector(`[data-vessel="${item.id}"]`);
-      if (!layer) {
-        layer = document.createElement("div");
-        layer.className = "layer";
-        layer.dataset.vessel = item.id;
-        layers.appendChild(layer);
-      }
-      const pos = refScreen(item, vessel, anchor, ppm);
-      layer.style.transformOrigin = pos.x + "px " + pos.y + "px";
-      layer.style.transform = `rotate(${item.att}rad)`;
-      syncLayer(layer, spriteSpecs(item, pos, ppm));
-    }
-    for (const layer of [...layers.querySelectorAll(".layer")]) {
-      if (!keep.has(layer.dataset.vessel)) layer.remove();
-    }
-    const speed = speedOf(vessel);
-    view.querySelector("#read-speed").textContent = formatSpeed(speed);
-    view.querySelector("#read-alt").textContent = formatAlt(alt);
-    view.querySelector("#fuel-fill").style.width = Math.round(fuelFrac(vessel) * 100) + "%";
+    if (layers) layers.innerHTML = "";
+    const arrow = view.querySelector("#varr");
+    if (arrow) arrow.hidden = true;
+    view.querySelector("#read-speed").textContent = formatSpeed(info.speed);
+    view.querySelector("#read-alt").textContent = formatAlt(info.alt);
+    const peri = view.querySelector("#read-peri");
+    const apo = view.querySelector("#read-apo");
+    const showOrbit = info.e < 0.92 && info.radialAlt > 300;
+    if (peri) peri.textContent = showOrbit ? formatAlt(info.periAlt) : "—";
+    if (apo) apo.textContent = showOrbit ? formatAlt(info.apoAlt) : "—";
+    view.querySelector("#fuel-fill").style.width = Math.round(info.fuel * 100) + "%";
+    const warp = view.querySelector("#warp-label");
+    if (warp) warp.textContent = "×" + info.warpSpeed;
     const ring = view.querySelector("#thr");
     if (ring && ring.paint) ring.paint();
-    const arrow = view.querySelector("#varr");
-    const r = Math.hypot(vessel.x, vessel.y) || 1;
-    const radial = { x: vessel.x / r, y: vessel.y / r };
-    const right = { x: radial.y, y: -radial.x };
-    const vUp = vessel.vx * radial.x + vessel.vy * radial.y;
-    const vRt = vessel.vx * right.x + vessel.vy * right.y;
-    if (!shouldShowVelocityArrow(speed)) {
-      arrow.hidden = true;
-    } else {
-      const ang = Math.atan2(vRt, vUp);
-      arrow.hidden = false;
-      const reach = Math.min(96, Math.max(56, h * 0.12));
-      arrow.style.left = anchor.x + Math.sin(ang) * reach + "px";
-      arrow.style.top = anchor.y - Math.cos(ang) * reach + "px";
-      arrow.style.transform = `translate(-50%, -50%) rotate(${ang}rad)`;
-    }
     window.__TK.flight = app.flight;
-  }
-
-  function refScreen(item, main, anchor, ppm) {
-    if (item.id === main.id) return anchor;
-    const dx = item.x - main.x;
-    const dy = item.y - main.y;
-    const r = Math.hypot(main.x, main.y) || 1;
-    const radial = { x: main.x / r, y: main.y / r };
-    const right = { x: radial.y, y: -radial.x };
-    const up = dx * radial.x + dy * radial.y;
-    const rt = dx * right.x + dy * right.y;
-    return { x: anchor.x + rt * ppm, y: anchor.y - up * ppm };
-  }
-
-  function spriteSpecs(vessel, pos, ppm) {
-    const s = SCALE.mPerPx * ppm;
-    const thr = vessel.id === app.flight.activeId ? app.throttle : 0;
-    const liquid = vessel.parts.some((p) => p.fuelType === "liquid" && p.fuel > 0.05);
-    const engineOn = !!(vessel.controllable && thr > 0.02 && liquid);
-    const specs = [];
-    const ordered = vessel.parts.slice().sort((a, b) => rank(a) - rank(b));
-    for (const p of ordered) {
-      const cx = pos.x + p.localX * ppm;
-      const cy = pos.y - p.localY * ppm;
-      if (p.role === "chute" && (vessel.chute === "mid" || vessel.chute === "open")) {
-        const def = getPart("parachute");
-        const which = vessel.chute === "open" ? "open" : "mid";
-        const spec = def.spriteSize[which];
-        const stow = def.spriteSize.stow;
-        const stowOcy = (stow.opaque.t + stow.opaque.b) / 2;
-        const bottomY = cy + (stow.opaque.b - stowOcy) * s + 0.2 * ppm;
-        const ocx = (spec.opaque.l + spec.opaque.r) / 2;
-        specs.push({
-          k: p.uid,
-          src: def.sprites[which],
-          left: cx - ocx * s,
-          top: bottomY - spec.opaque.b * s,
-          width: spec.w * s,
-          height: spec.h * s,
-          flip: false,
-        });
-        continue;
-      }
-      let src = p.src;
-      let dh = p.spriteH * s;
-      const dw = p.spriteW * s;
-      if (p.role === "engine" && engineOn && p.plume) {
-        src = p.plume;
-        dh = p.plumeH * s;
-      }
-      const left = cx - p.ocx * s;
-      const top = cy - p.ocy * s;
-      specs.push({ k: p.uid, src, left, top, width: dw, height: dh, flip: p.flip });
-      if (p.role === "booster" && p.ignited && p.fuel > 0.05) {
-        const flicker = 0.82 + 0.18 * Math.sin(app.flight.time * 42 + p.localX);
-        specs.push({
-          k: "flame-" + p.uid,
-          kind: "flame",
-          left: left + dw * 0.3,
-          top: top + dh * 0.9,
-          width: dw * 0.4,
-          height: dh * 0.24 * flicker,
-        });
-      }
-    }
-    return specs;
-  }
-
-  function rank(p) {
-    if (p.role === "booster") return 2;
-    if (p.role === "chute") return 3;
-    return 1;
-  }
-
-  function syncLayer(layer, specs) {
-    const have = new Map([...layer.children].map((el) => [el.dataset.k, el]));
-    const keep = new Set();
-    for (const spec of specs) {
-      keep.add(spec.k);
-      let el = have.get(spec.k);
-      const wantFlame = spec.kind === "flame";
-      if (!el || wantFlame !== (el.dataset.kind === "flame")) {
-        if (el) el.remove();
-        el = wantFlame ? document.createElement("div") : document.createElement("img");
-        el.dataset.k = spec.k;
-        el.dataset.kind = wantFlame ? "flame" : "img";
-        if (wantFlame) el.className = "flame";
-        else el.draggable = false;
-        layer.appendChild(el);
-      }
-      if (el.tagName === "IMG" && el.getAttribute("src") !== spec.src) el.setAttribute("src", spec.src);
-      el.style.left = spec.left + "px";
-      el.style.top = spec.top + "px";
-      el.style.width = spec.width + "px";
-      el.style.height = spec.height + "px";
-      if (el.tagName === "IMG") el.style.transform = spec.flip ? "scaleX(-1)" : "";
-    }
-    for (const [key, el] of have) if (!keep.has(key)) el.remove();
+    window.__TK.info = info;
   }
 
   function onKey(e) {
@@ -1153,12 +1134,24 @@ export function boot() {
     }
     if (app.screen !== "flight") return;
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) e.preventDefault();
+    if (down && ["ArrowLeft", "ArrowRight", "a", "A", "d", "D", "w", "W", "s", "S", "ArrowUp", "ArrowDown", " ", "f", "F"].includes(e.key)) {
+      stopAuto();
+    }
     if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") app.keys.left = down;
     if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") app.keys.right = down;
     if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") app.keys.up = down;
     if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") app.keys.down = down;
     if (down && (e.key === " " || e.key === "j" || e.key === "J")) app.edge.separate = true;
     if (down && (e.key === "f" || e.key === "F" || e.key === "k" || e.key === "K")) app.edge.deploy = true;
+    if (down && (e.key === "[" || e.key === ",")) app.edge.warp = (app.edge.warp || 0) - 1;
+    if (down && (e.key === "]" || e.key === ".")) app.edge.warp = (app.edge.warp || 0) + 1;
+    if (down && (e.key === "m" || e.key === "M")) {
+      app.cam.map = !app.cam.map;
+      const btn = view.querySelector("#map-toggle");
+      if (btn) btn.classList.toggle("on", app.cam.map);
+    }
+    if (down && (e.key === "+" || e.key === "=")) app.cam.zoom = clamp(app.cam.zoom * 1.15, 0.08, 12);
+    if (down && (e.key === "-" || e.key === "_")) app.cam.zoom = clamp(app.cam.zoom / 1.15, 0.08, 12);
   }
 
   window.addEventListener("keydown", onKey);
@@ -1180,6 +1173,20 @@ export function boot() {
     show,
     openWorld: (id, mode) => openWorld(id, mode),
     store,
+    playUntil: (phase) => runGuide(phase),
+    crashDive: () => crashDive(),
+    snapshot: () => snapshot(),
+    setMap: (on) => {
+      app.cam.map = !!on;
+      const btn = view.querySelector("#map-toggle");
+      if (btn) btn.classList.toggle("on", app.cam.map);
+      drawFlight();
+    },
+    setZoom: (z) => {
+      app.cam.zoom = z;
+      drawFlight();
+    },
+    images: loadImages(partImageUrls()),
   };
 
   show("home");

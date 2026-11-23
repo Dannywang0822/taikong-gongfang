@@ -4,7 +4,7 @@
 
 import { artRocket, hopRocket } from "./rocket.js";
 
-const KEY = "taikong-gongfang-p0-v1";
+const KEY = "taikong-gongfang-play-v2";
 
 function memoryStorage() {
   const m = new Map();
@@ -49,7 +49,7 @@ export function createStore(storage) {
       const raw = storage.getItem(KEY);
       if (!raw) return null;
       const data = JSON.parse(raw);
-      if (!data || data.v !== 1 || !Array.isArray(data.worlds)) return null;
+      if (!data || data.v !== 2 || !Array.isArray(data.worlds)) return null;
       return data;
     } catch {
       return null;
@@ -61,7 +61,7 @@ export function createStore(storage) {
   function ensure() {
     let data = read();
     if (!data) {
-      data = { v: 1, lastWorldId: "sample-qingya", worlds: seedWorlds() };
+      data = { v: 2, lastWorldId: "sample-qingya", worlds: seedWorlds() };
       write(data);
     }
     return data;

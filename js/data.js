@@ -1,95 +1,62 @@
 /**
- * 太空工坊 P0 自研数据。
+ * 太空工坊零件与手感。
  *
- * 这里的每一个数字都是为了让建造–飞行–开伞闭环可玩、可单测而设的占位。
- * 它们不是从官方游戏提取的数值，代码和界面都不得把它们说成官方数据。
- * 证据等级沿用项目规格里的「估计」。
+ * 几何来自锁定的原创零件图。质量、推力、比冲是原创数值，只参考
+ * 「推力数 / 湿质量 ≈ 推重比」这种量级，不复刻任何零件表。
+ * 天体尺度、气动、伞、碰撞和时间档的参考常数在 physics.js / bodies.js。
  */
 
-export const EVIDENCE = "估计";
+export const EVIDENCE = "原创";
 
-/** 把比冲换成排气速度时用的标准重力。不是从官方公式还原的常数。 */
-export const ISP_G0 = 9.80665;
+/** 与参考推力公式同一个 9.8，用来把推力数换成加速度量纲。 */
+export const ISP_G0 = 9.8;
 
 export const SCALE = {
-  source: EVIDENCE,
+  source: "原创",
   /** 芯级不透明宽度对应的直径，用来把零件图像换成米。 */
   coreDiameterM: 1.8,
   coreOpaquePx: 131,
 };
 SCALE.mPerPx = SCALE.coreDiameterM / SCALE.coreOpaquePx;
 
-export const PLANET = {
-  source: EVIDENCE,
-  id: "qingya",
-  name: "青芽",
-  radius: 80000,
-  g: 7.5,
-  atmScale: 4500,
-  atmTop: 28000,
-  rho0: 1.05,
-};
-PLANET.mu = PLANET.g * PLANET.radius * PLANET.radius;
-
 export const FUELS = {
-  liquid: {
-    id: "liquid",
-    name: "液体燃料",
-    unit: "千克",
-    density: 820,
-    flow: 12.6,
-    source: EVIDENCE,
-  },
-  solid: {
-    id: "solid",
-    name: "固体燃料",
-    unit: "千克",
-    density: 1200,
-    flow: 13.4,
-    source: EVIDENCE,
-  },
+  liquid: { id: "liquid", name: "液体燃料", resourceMass: 1 },
+  solid: { id: "solid", name: "固体燃料", resourceMass: 1 },
 };
 
-export const AERO = {
-  source: EVIDENCE,
-  coreCdA: 1.05,
-  boosterCdA: 0.55,
-  chuteMid: 48,
-  chuteOpen: 420,
+/**
+ * 姿态手感，全部可调。反作用轮力矩和喷管偏转角是为这套质量、米制杠杆调的；
+ * 参考里指令舱力矩序列化值是 5，但单位对不上这套尺度，所以不直接拿来用。
+ * RCS 的推力 1.5、比冲 120、两个角度阈值采用参考序列化值。
+ */
+export const CONTROL = {
+  wheelTorque: 42,
+  /** 重船太钝、轻舱太灵时，角加速度不超过这个值。 */
+  maxAlpha: 0.95,
+  gimbalDeg: 5.5,
+  angularDamp: 1.7,
+  rcsThrust: 1.5,
+  rcsIsp: 120,
+  rcsDirDeg: 45,
+  rcsTorqueDeg: 40,
+  chuteUpright: 2.4,
 };
 
-export const CHUTE = {
-  source: EVIDENCE,
-  /** 约 8 km、约 190 m/s 开伞不应直接算成功，所以门限收在这下面。 */
-  maxAlt: 4500,
-  maxSpeed: 80,
-  deployTime: 1.2,
+/** 分离冲量 = 力 × 倍率 × 一帧。帧长用参考里约 0.02 的固定步长，力是原创。 */
+export const STAGE = {
+  force: 4800,
+  multiplier: 1,
+  frame: 0.02,
 };
 
 export const LANDING = {
-  source: EVIDENCE,
-  /** 约 15–20 m/s 的下沉不算轻落地。 */
-  maxSink: 11,
-  maxLateral: 8,
-  maxTilt: 0.6,
-  /** 底部高出这段之后，才按飞行中的落地规则，而不是发射台。 */
-  leftPadAlt: 40,
-  /** 还在发射台附近时，超过这个地速或倾角就坠毁。估计。 */
-  padSlideSpeed: 22,
+  /** 撑住撞击之后，速率低于参考里的 2 就判定已经落地。 */
+  settleSpeed: 2,
+  maxTilt: 0.65,
+  leftPadAlt: 80,
   tipCrash: 0.85,
-};
-
-export const CONTROL = {
-  source: EVIDENCE,
-  /** 短按只是小幅倾斜，按住几秒才会接近水平。 */
-  alpha: 0.62,
-  maxOmega: 0.42,
-  damp: 2.4,
-};
-
-export const STAGE = {
-  source: EVIDENCE,
-  impulse: 6,
+  /** 默认摩擦，接触时用来抹掉剩余横移。 */
+  friction: 0.4,
 };
 
 /**
@@ -110,9 +77,13 @@ export const PARTS = {
       top: { x: 71, y: 6, accepts: ["parachute"] },
       bottom: { x: 71, y: 238, accepts: ["stack", "engine"] },
     },
-    dry: 700,
-    fuel: 0,
+    wetMass: 0.95,
+    dryMassPercent: 1,
     fuelType: null,
+    impact: "high",
+    wheel: true,
+    rcs: true,
+    rcsFuel: 0.08,
     source: EVIDENCE,
   },
   "tank-short": {
@@ -130,9 +101,10 @@ export const PARTS = {
       "side-left": { x: 6, y: 110, accepts: ["booster"] },
       "side-right": { x: 136, y: 110, accepts: ["booster"] },
     },
-    dry: 180,
-    fuel: 900,
+    wetMass: 4,
+    dryMassPercent: 0.15,
     fuelType: "liquid",
+    impact: "medium",
     source: EVIDENCE,
   },
   "tank-long": {
@@ -150,9 +122,10 @@ export const PARTS = {
       "side-left": { x: 6, y: 310, accepts: ["booster"] },
       "side-right": { x: 136, y: 310, accepts: ["booster"] },
     },
-    dry: 360,
-    fuel: 2400,
+    wetMass: 9,
+    dryMassPercent: 0.12,
     fuelType: "liquid",
+    impact: "medium",
     source: EVIDENCE,
   },
   "engine-liquid": {
@@ -169,11 +142,13 @@ export const PARTS = {
     nodes: {
       top: { x: 57, y: 4, accepts: ["stack", "nose"] },
     },
-    dry: 500,
-    fuel: 0,
+    wetMass: 1.25,
+    dryMassPercent: 1,
     fuelType: "liquid",
-    thrust: 34000,
-    isp: 262,
+    thrust: 46,
+    isp: 290,
+    gimbal: true,
+    impact: "medium",
     source: EVIDENCE,
   },
   "booster-solid": {
@@ -191,11 +166,12 @@ export const PARTS = {
     },
     bodyLeft: 33,
     bodyRight: 109,
-    dry: 280,
-    fuel: 1100,
+    wetMass: 6.8,
+    dryMassPercent: 0.18,
     fuelType: "solid",
-    thrust: 28000,
-    isp: 214,
+    thrust: 38,
+    isp: 210,
+    impact: "low",
     source: EVIDENCE,
   },
   decoupler: {
@@ -211,9 +187,10 @@ export const PARTS = {
       top: { x: 69, y: 4, accepts: ["stack", "nose"] },
       bottom: { x: 69, y: 62, accepts: ["stack", "engine"] },
     },
-    dry: 70,
-    fuel: 0,
+    wetMass: 0.14,
+    dryMassPercent: 1,
     fuelType: null,
+    impact: "low",
     source: EVIDENCE,
   },
   parachute: {
@@ -238,9 +215,10 @@ export const PARTS = {
     nodes: {
       bottom: { x: 33, y: 118, accepts: [] },
     },
-    dry: 50,
-    fuel: 0,
+    wetMass: 0.08,
+    dryMassPercent: 1,
     fuelType: null,
+    impact: "low",
     source: EVIDENCE,
   },
   adapter: {
@@ -258,9 +236,10 @@ export const PARTS = {
       "side-left": { x: 6, y: 90, accepts: ["booster"] },
       "side-right": { x: 136, y: 90, accepts: ["booster"] },
     },
-    dry: 140,
-    fuel: 0,
+    wetMass: 0.3,
+    dryMassPercent: 1,
     fuelType: null,
+    impact: "medium",
     source: EVIDENCE,
   },
 };
@@ -342,23 +321,41 @@ export const COPY = {
     speed: "速度",
     throttle: "油门",
     alt: "离地",
+    peri: "近地点",
+    apo: "远地点",
     left: "左",
     right: "右",
     stage: "分离",
     chute: "开伞",
+    map: "地图",
+    warpUp: "加速",
+    warpDown: "减速",
+    auto: "演示入轨",
+    manual: "手控",
+    autoOn: "演示飞行中。碰一下操纵就会交回手控。",
     noStage: "没有可以分离的东西。",
     stagedBoosters: "助推器已分离。",
     stagedCore: "这一级已分离。",
     chuteHigh: "还太高，再低一些再开伞。",
     chuteFast: "速度太高，伞张不开。",
+    chuteSlow: "几乎没在动，先不用开伞。",
+    chuteThin: "这里没有大气。",
     chuteNone: "没有降落伞。",
     chuteOpen: "降落伞已打开。",
+    chuteFull: "降落伞完全张开。",
+    warpBlocked: "现在不能用这么高的时间加速。",
+    warpAtmo: "还在大气层里，只能用物理档。",
+    warpThrust: "发动机开着，时间保持一倍。",
     resume: "继续飞行",
     backBuild: "返回建造",
     backHome: "返回主菜单",
+    zoomIn: "拉近",
+    zoomOut: "拉远",
   },
   fail: {
     title: "没有落地",
+    terrain: "火箭撞上了地表，结构没有撑住。",
+    tip: "火箭在地面上翻倒了。",
     body: "还可以再试一次，或结束这次飞行。",
     retry: "重试",
     end: "结束任务",
@@ -380,12 +377,13 @@ export const COPY = {
       "点下方的零件，再点火箭上亮起的圆点，零件就会接上去。第一件也可以直接放到空台上。",
       "点一下已经放好的零件可以选中。选错了按「撤销」；「拆除」会拿掉选中的零件，以及接在它下面的部分。",
       "没有燃料就不能试飞。短储箱和长储箱装液体燃料，固体助推自己带着燃料。分离器会把上下两段切开。",
-      "试飞之后，上下拖动圆形油门起飞，按住「左」「右」转向。分离会先抛下侧面的助推，再断开最下面的分离器。离地低一些、速度不大时再开伞。",
+      "试飞之后，上下拖动圆形油门起飞，按住「左」「右」或 A / D 转向。先竖直上升，再逐渐压平，让远地点升到大气层外，到远地点附近朝前推，把近地点也抬出去。",
+      "地图上看轨道。大气层里或发动机开着时不能用高倍时间加速。再入之后，高度和速度都合适才开得了伞。伞会自己完全张开。落地要正、要慢，撞太狠会解体。",
     ],
   },
   credits: {
     title: "制作人员",
-    body: "太空工坊是个人研究的原创试作。建造、飞行和这套界面都是自己写的。锁定美术 v0.4 全部为原创绘制，不是官方应用里的图片、字体或音频。飞行用的质量、推力和大气没有公开可引用的官方数值，在代码里标为估计。",
+    body: "太空工坊是原创的浏览器火箭游戏。建造、轨道、画面和这套界面都是自己写的。锁定美术全部为原创绘制。重力、大气、推力和开伞用了公开分析里的规则和一部分常数；零件质量、推力和姿态手感是单独调的，不是原作数据。",
   },
   soon: "即将推出。",
   file: "请在项目目录运行 python3 -m http.server 8080，然后打开 http://localhost:8080 。直接双击 HTML 时，浏览器会拦截模块脚本。",

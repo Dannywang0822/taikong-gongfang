@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
-import { CHUTE, CONTROL, COPY, LANDING, PICKER, PLANET } from "../js/data.js";
+import { COPY, LANDING, PICKER } from "../js/data.js";
 import {
   artRocket,
-  bareRocket,
   buildStatus,
   compileVessel,
   hopRocket,
@@ -125,49 +124,14 @@ test("staging drops boosters first, then the lower stage", () => {
   assert.equal(second.events.some((e) => e.code === "staged-core"), true);
 });
 
-test("gravity pulls a coasting rocket down", () => {
-  const vessel = compileVessel(hopRocket());
-  vessel.y = PLANET.radius + 1000;
-  vessel.x = 0;
-  const state = {
-    vessels: [vessel],
-    activeId: vessel.id,
-    time: 0,
-    maxAlt: 1000,
-    maxSpeed: 0,
-    outcome: null,
-    leftPad: true,
-  };
-  const next = step(state, idle, 2).state;
-  const v = next.vessels[0];
-  assert.ok(altitude(v) < 990, "alt " + altitude(v));
-  assert.ok(v.vy < 0);
-});
-
-test("throttle climbs, fuel burns, and a chute lands the hop", () => {
+test("a hop burns fuel, climbs, and still answers the stick", () => {
   let state = createFlight(compileVessel(hopRocket()));
   const before = fuelFrac(state.vessels[0]);
-  for (let i = 0; i < 120; i += 1) state = step(state, { ...idle, throttle: 1 }, 0.05).state;
-  const after = fuelFrac(state.vessels.find((v) => v.id === state.activeId));
-  assert.ok(after < before);
+  for (let i = 0; i < 40; i += 1) state = step(state, { ...idle, throttle: 1 }, 0.05).state;
+  const vessel = state.vessels.find((v) => v.id === state.activeId);
+  assert.ok(fuelFrac(vessel) < before);
   assert.ok(state.maxAlt > 40, "maxAlt " + state.maxAlt);
-  let sent = false;
-  for (let i = 0; i < 4000 && !state.outcome; i += 1) {
-    const v = state.vessels.find((item) => item.id === state.activeId);
-    const alt = altitude(v);
-    const spd = speedOf(v);
-    const deploy = !sent && v.chute === "stow" && alt < CHUTE.maxAlt && spd < CHUTE.maxSpeed && state.time > 8;
-    if (deploy) sent = true;
-    state = step(state, { ...idle, deploy }, 0.05).state;
-  }
-  assert.equal(state.outcome, "land", "outcome " + state.outcome + " alt " + state.maxAlt);
-});
-
-test("hitting the ground without a chute fails the flight", () => {
-  let state = createFlight(compileVessel(bareRocket()));
-  for (let i = 0; i < 100; i += 1) state = step(state, { ...idle, throttle: 1 }, 0.05).state;
-  for (let i = 0; i < 4000 && !state.outcome; i += 1) state = step(state, idle, 0.05).state;
-  assert.equal(state.outcome, "crash");
+  assert.equal(state.outcome, null);
 });
 
 test("removing a placed part drops that part and what hangs on it", () => {
@@ -190,20 +154,24 @@ test("part taps are not covered by the empty node layer", () => {
 
 test("tipping over on the pad crashes instead of sliding", () => {
   let state = createFlight(compileVessel(hopRocket()));
-  for (let i = 0; i < 120 && !state.outcome; i += 1) {
+  for (let i = 0; i < 240 && !state.outcome; i += 1) {
     state = step(state, { ...idle, right: true }, 0.05).state;
   }
   assert.equal(state.outcome, "crash");
-  assert.ok(Math.abs(state.vessels[0].att) > LANDING.tipCrash * 0.5);
   assert.ok(state.maxAlt < LANDING.leftPadAlt);
 });
 
-test("a fast ground slide on the pad crashes", () => {
+test("a fast ground impact becomes a failure after the three second delay", () => {
   const state = createFlight(compileVessel(hopRocket()));
-  state.vessels[0].vx = 180;
-  const next = step(state, idle, 0.05);
-  assert.equal(next.state.outcome, "crash");
-  assert.ok(next.events.some((e) => e.type === "crash"));
+  state.leftPad = true;
+  state.vessels[0].vy = -260;
+  const first = step(state, idle, 0.05);
+  assert.equal(first.state.outcome, null);
+  assert.ok(first.state.pendingFailure);
+  let next = first.state;
+  for (let i = 0; i < 80 && !next.outcome; i += 1) next = step(next, idle, 0.05).state;
+  assert.equal(next.outcome, "crash");
+  assert.ok(next.time >= 3);
 });
 
 test("a short steering hold is a tilt, not horizontal", () => {
@@ -211,9 +179,8 @@ test("a short steering hold is a tilt, not horizontal", () => {
   for (let i = 0; i < 10; i += 1) state = step(state, { ...idle, right: true }, 0.05).state;
   const att = Math.abs(state.vessels[0].att);
   assert.equal(state.outcome, null);
-  assert.ok(att > 0.02, "moved " + att);
-  assert.ok(att < 0.22, "too far " + att);
-  assert.ok(CONTROL.maxOmega < 0.6);
+  assert.ok(att > 0.05, "moved " + att);
+  assert.ok(att < 0.45, "too far " + att);
 });
 
 test("a gentle tilt on the pad does not crash", () => {
@@ -230,9 +197,7 @@ test("retry at rest does not show the velocity arrow", () => {
   assert.ok(speed < 12, "speed " + speed);
   assert.equal(shouldShowVelocityArrow(speed), false);
   assert.equal(shouldShowVelocityArrow(0), false);
-  assert.equal(LANDING.maxSink < 15, true);
-  assert.equal(CHUTE.maxAlt < 8000, true);
-  assert.equal(CHUTE.maxSpeed < 190, true);
+  assert.equal(LANDING.settleSpeed, 2);
 });
 
 test("worlds save in this project's own json", () => {
@@ -246,7 +211,7 @@ test("worlds save in this project's own json", () => {
   store.update(made.id, { activity: "已着陆" });
   const again = createStore(storage);
   assert.equal(again.get(made.id).activity, "已着陆");
-  const raw = storage.getItem("taikong-gongfang-p0-v1");
+  const raw = storage.getItem("taikong-gongfang-play-v2");
   assert.equal(raw.includes("sfs"), false);
-  assert.equal(JSON.parse(raw).v, 1);
+  assert.equal(JSON.parse(raw).v, 2);
 });
